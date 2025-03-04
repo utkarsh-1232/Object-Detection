@@ -6,11 +6,16 @@ from PIL import Image, ImageDraw
 from torch import tensor
 from torch.utils.data import Dataset
 
+<<<<<<< HEAD
 path = Path('data')
+=======
+path = Path('../data')
+>>>>>>> 77509f1a5ad541221dee0e1ed92231c5e8c6c0cf
 with open(path/'annotations/train.json', 'r') as f:
     data = json.load(f)
 
 id2img = {d['id']:f'{path}/train_images/{d['file_name']}' for d in data['images']}
+<<<<<<< HEAD
 cat_id2id = {d['id']:i+1 for i, d in enumerate(data['categories'])}
 id2label = {i+1:d['name'] for i, d in enumerate(data['categories'])}
 id2label[0] = 'background'
@@ -25,6 +30,10 @@ def show_bbs(img, boxes, labels=None):
     plt.imshow(img)
     plt.axis('off')
     plt.show()
+=======
+cat_id2id = {d['id']:i for i, d in enumerate(data['categories'])}
+id2label = {i:d['name'] for i, d in enumerate(data['categories'])}
+>>>>>>> 77509f1a5ad541221dee0e1ed92231c5e8c6c0cf
 
 class ObjectDataset(Dataset):
     def __init__(self, df, tfms=None):
@@ -46,4 +55,27 @@ class ObjectDataset(Dataset):
         img_id, boxes, ids = [*self.df.loc[idx]]
         img = Image.open(id2img[img_id])
         labels = [id2label[id] for id in ids]
+<<<<<<< HEAD
         show_bbs(img, boxes, labels)
+=======
+        
+        for label, box in zip(labels, boxes):
+            x_min, y_min, w, h = box
+            draw.rectangle(((x_min, y_min), (x_min+w, y_min+h)), outline="green", width=3)
+            draw.text((x_min, y_min-10), label, fill="white")
+        plt.imshow(img)
+        plt.axis('off')
+        plt.show()
+
+def get_iou(boxA, boxB, epsilon=1e-5):
+    x_min = max(boxA[0], boxB[0])
+    y_min = max(boxA[1], boxB[1])
+    x_max = min(boxA[0]+boxA[2], boxB[0]+boxB[2])
+    y_max = min(boxA[1]+boxA[3], boxB[1]+boxB[3])
+    w, h = x_max-x_min, y_max-y_min
+
+    if w<0 or h<0: return 0
+    intersection = w*h
+    union = boxA[2]*boxA[3] + boxB[2]*boxB[3] - intersection
+    return intersection/(union+epsilon)
+>>>>>>> 77509f1a5ad541221dee0e1ed92231c5e8c6c0cf
