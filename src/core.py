@@ -1,16 +1,18 @@
 import json
+from pathlib import Path
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw
 
 from torch import tensor
 from torch.utils.data import Dataset
 
-# with open('data/annotations/train.json', 'r') as f:
-#     data = json.load(f)
+path = Path('../data')
+with open(path/'annotations/train.json', 'r') as f:
+    data = json.load(f)
 
-# id2img = {d['id']:f'data/train_images/{d['file_name']}' for d in data['images']}
-# cat_id2id = {d['id']:i for i, d in enumerate(data['categories'])}
-# id2label = {i:d['name'] for i, d in enumerate(data['categories'])}
+id2img = {d['id']:f'{path}/train_images/{d['file_name']}' for d in data['images']}
+cat_id2id = {d['id']:i for i, d in enumerate(data['categories'])}
+id2label = {i:d['name'] for i, d in enumerate(data['categories'])}
 
 class ObjectDataset(Dataset):
     def __init__(self, df, tfms=None):
@@ -53,7 +55,3 @@ def get_iou(boxA, boxB, epsilon=1e-5):
     intersection = w*h
     union = boxA[2]*boxA[3] + boxB[2]*boxB[3] - intersection
     return intersection/(union+epsilon)
-
-from pathlib import Path
-path = Path('../data/annotations/train.json')
-print(path.exists())
