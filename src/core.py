@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw
 
@@ -8,31 +9,33 @@ class JSONLoader:
         data_folder = Path(data_folder)
         self.ann_folder = data_folder/'annotations'
         self.img_folder = data_folder/'images'
-        self.id2img = {}
 
     def load_train(self):
         with open(self.ann_folder/'train.json', 'r') as f:
             data = json.load(f)
+            
         df = pd.DataFrame(data['annotations'])
-        self.id2img.update({d['id']:self.img_folder/d['file_name'] for d in data['images']})
-        # fix the category ids and update the dataframe
+        id2img = {d['id']:self.img_folder/d['file_name'] for d in data['images']}
         cat_id2id = {d['id']:i+1 for i, d in enumerate(data['categories'])}
+        id2label = {i+1:d['name'] for i, d in enumerate(data['categories'])}
+        id2label[0] = 'background'
+
+        df.image_id = df.image_id.replace(id2img)
         df.category_id = df.category_id.replace(cat_id2id)
-        self.id2label = {i+1:d['name'] for i, d in enumerate(data['categories'])}
-        self.id2label[0] = 'background'
-        return df
+        return df, id2label
 
     def load_test(self):
         with open(self.ann_folder/'test.json', 'r') as f:
             data = json.load(f)
         df = pd.DataFrame(data['annotations'])
-        self.id2img.update({d['id']:self.img_folder/d['file_name'] for d in data['images']})
+        id2img = {d['id']:self.img_folder/d['file_name'] for d in data['images']}
+        df.image_id = df.image_id.replace(id2img)
         return df
 
 def show_bbs(img, bboxes, ids=None):
     draw = ImageDraw.Draw(img)
     if ids:
-        labels = [loader.id2label[id] for id in ids]
+        labels = [id2label[id] for id in ids]
     for i, bbox in enumerate(bboxes):
         x_min, y_min, w, h = bbox
         draw.rectangle(((x_min, y_min), (x_min+w, y_min+h)), outline="green", width=3)
