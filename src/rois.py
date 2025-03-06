@@ -1,5 +1,6 @@
 from typing import Optional
 from dataclasses import dataclass
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -17,9 +18,9 @@ class ROIs:
         self.ids = torch.full((self.boxes.shape[0],), 0, dtype=torch.long)
 
 def annotate_rois(rois, bboxes, ids, cat_thresh=0.3):
-    rois.boxes = torch.cat([rois.boxes[:,:2], rois.boxes[:,:2]+rois.boxes[:,2:]], dim=1)
+    boxes = torch.cat([rois.boxes[:,:2], rois.boxes[:,:2]+rois.boxes[:,2:]], dim=1)
     bboxes = torch.cat([bboxes[:,:2], bboxes[:,:2]+bboxes[:,2:]], dim=1)
-    ious = box_iou(rois.boxes, bboxes)
+    ious = box_iou(boxes, bboxes)
     max_ious, max_idxs = ious.max(dim=1)
     valid_mask = max_ious>cat_thresh
     rois.ids[valid_mask] = ids[max_idxs[valid_mask]]
@@ -49,7 +50,7 @@ class ObjectDataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        img_path, bboxes, ids = agg_df.loc[idx]
+        img_path, bboxes, ids = self.df.loc[idx]
         img = Image.open(img_path)
         img = self.img_tfms(img)
         bboxes = torch.tensor(bboxes, dtype=torch.float32)
@@ -71,4 +72,4 @@ class ObjectDataset(Dataset):
         all_ids = torch.cat([item['rois'].ids for item in batch], dim=0)
         all_offsets = torch.cat([item['rois'].offsets for item in batch], dim=0)
         
-        return {'crops':all_crops, 'ids':all_ids, 'offsets':all_offsets}
+        return all_crops, all_ids, all_offsets
