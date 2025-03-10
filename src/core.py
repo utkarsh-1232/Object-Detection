@@ -15,14 +15,14 @@ class JSONLoader:
             data = json.load(f)
             
         df = pd.DataFrame(data['annotations'])
-        df = df.groupby('image_id').agg(list).reset_index()
         id2img = {d['id']:self.img_folder/d['file_name'] for d in data['images']}
         cat_id2id = {d['id']:i+1 for i, d in enumerate(data['categories'])}
         id2label = {i+1:d['name'] for i, d in enumerate(data['categories'])}
         id2label[0] = 'background'
 
-        df.image_id = df.image_id.replace(id2img)
         df.category_id = df.category_id.replace(cat_id2id)
+        df = df.groupby('image_id').agg(list).reset_index()
+        df.image_id = df.image_id.replace(id2img)
         return df, id2label
 
     def load_test(self):
