@@ -22,19 +22,17 @@ class JSONLoader:
 
         df.category_id = df.category_id.replace(cat_id2id)
         df = df.groupby('image_id').agg(list).reset_index()
-        df.image_id = df.image_id.replace(id2img)
-        return df, id2label
+        return df, id2label, id2img
 
-    def load_test(self):
+    def load_test(self, id2img):
         with open(self.ann_folder/'test.json', 'r') as f:
             data = json.load(f)
         df = pd.DataFrame(data['annotations'])
         df = df.groupby('image_id').agg(list).reset_index()
-        id2img = {d['id']:self.img_folder/d['file_name'] for d in data['images']}
-        df.image_id = df.image_id.replace(id2img)
+        id2img.extend({d['id']:self.img_folder/d['file_name'] for d in data['images']})
         return df
 
-def show_bbs(img, bboxes, ids=None):
+def show_bbs(img, bboxes, ids=None, id2label=None):
     draw = ImageDraw.Draw(img)
     if ids:
         labels = [id2label[id] for id in ids]
