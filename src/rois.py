@@ -36,6 +36,6 @@ def get_annotated_rois(row, id2img, cat_thresh=0.3):
 
     rois = extract_rois(img_tensor)
     roi_ids, offsets = annotate_rois(rois, gtbbs, ids, cat_thresh)
-    img_ids = img_id[None].repeat(rois.shape[0], 1)
+    img_ids = img_id.repeat(rois.shape[0])
     img_dims = torch.tensor([W,H,W,H])[None,:].repeat(rois.shape[0], 1)
     return img_ids, rois, roi_ids, offsets, img_dims
