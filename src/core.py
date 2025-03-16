@@ -17,12 +17,12 @@ def show_bbs(img_path, bboxes, labels=None):
     plt.axis('off')  # Hide axes for better visualization
     plt.show()
 
-def load_data(data_folder, split='train'):
-    data_folder = Path(data_folder)
-    data = json.load((data_folder/f'{split}.json').open())
+def load_data(ann_folder, imgs_folder, split='train'):
+    ann_folder, imgs_folder = Path(ann_folder), Path(imgs_folder)
+    data = json.load((ann_folder/f'{split}.json').open())
 
     id2label = {d['id']:d['name'] for d in data['categories']}
-    id2img = {d['id']:data_folder/f'train/{d['file_name']}' for d in data['images']}
+    id2img = {d['id']:imgs_folder/d['file_name'] for d in data['images']}
 
     df = pd.DataFrame(data['annotations'])
     df = df.query('ignore!=1').drop(columns=['segmentation','ignore'])
