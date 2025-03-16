@@ -1,70 +1,103 @@
-from PIL import Image
-import json
+import io, sys, json
+from pathlib import Path
+from functools import partial
+from tqdm import tqdm
+tqdm.pandas()
+from src.core import load_data
+from src.rois import apply_offsets, get_annotated_rois
+
 import torch
+from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
-from torch.utils.data import Dataset
-from torchvision import transforms, models
-from torchvision.transforms.functional import resized_crop
-from fastai.vision.all import Metric
+from torch.nn.functional import one_hot
+from torchvision.io import read_image, ImageReadMode
+import torchvision.transforms.v2 as v2
+from torchvision import models
+from torchvision.transforms.v2.functional import resized_crop
+
+from fastai.vision.all import DataLoaders, Metric
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 class RCNNDataset(Dataset):
-    def __init__(self, img_ids, rois, roi_ids, offsets, img_dims, id2img, crop_size=(224,224)):
-        self.img_ids, self.rois, self.roi_ids = img_ids, rois, roi_ids
-        self.offsets, self.img_dims = offsets, img_dims
-        self.id2img = id2img
+    def __init__(self, ann_path, imgs_path, sample_frac=1, crop_size=(224,224), tfms=None):
+        ann_path = Path(ann_path)
+        df, self.id2label, self.id2img = load_data(str(ann_path.parent), imgs_path, ann_path.stem)
+        replace = True if sample_frac>1 else False
+        df = df.sample(frac=sample_frac, replace=replace)
         self.crop_size = crop_size
-        self.img_tfms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
+        self.tfms = tfms
+        if self.tfms is None:
+            self.tfms = v2.Compose([
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        
+        res = df.progress_apply(get_annotated_rois, axis=1, id2img=self.id2img)
+        self.img_ids = torch.cat([row[0] for row in res])
+        self.rois = torch.cat([row[1] for row in res])
+        self.roi_ids = torch.cat([row[2] for row in res])
+        self.offsets = torch.cat([row[3] for row in res])
 
     def __len__(self):
         return self.img_ids.shape[0]
 
     def __getitem__(self, idx):
         img_id = self.img_ids[idx]
-        img = Image.open(self.id2img[img_id.item()]).convert('RGB')
-        img = self.img_tfms(img)
-        offset = self.offsets[idx]/self.img_dims[idx]
+        img = io.read_image(self.id2img[img_id.item()], mode=io.ImageReadMode.RGB)
+        img = self.tfms(img)
         x_min, y_min, w, h = self.rois[idx].int().tolist()
         crop = resized_crop(img, top=y_min, left=x_min, height=h, width=w, size=self.crop_size)
         
-        return crop, img_id, self.rois[idx], self.roi_ids[idx], offset, self.img_dims[idx]
+        return crop, img_id, self.rois[idx], self.roi_ids[idx], self.offsets[idx]
+
+def get_dls(train_ds, valid_ds, bs=128, tfms=None):
+    train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, pin_memory=True)
+    valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=False, pin_memory=True)
+    
+    dls = DataLoaders(train_dl, valid_dl)
+    dls.n_inp = 1
+    return dls
 
 class RCNN(nn.Module):
     def __init__(self, n_classes):
         super().__init__()
-        self.img_encoder = models.vgg16(weights=models.VGG16_Weights.DEFAULT)
-        for param in self.img_encoder.parameters():
+        self.model = models.vgg16(weights=models.VGG16_Weights.DEFAULT)
+        for param in self.model.parameters():
             param.requires_grad = False
-        self.img_encoder.eval()
-        encode_dim = self.img_encoder.classifier[0].in_features
-        self.img_encoder.classifier = nn.Sequential()
+        self.model.eval()
+        encode_dim = self.model.classifier[0].in_features
 
-        self.cls_head = nn.Linear(encode_dim, n_classes)
-        self.reg_head = nn.Sequential(
-            nn.Linear(encode_dim, 512), nn.ReLU(),
-            nn.Linear(512, 4), nn.Tanh(),
+        head = nn.Sequential(
+            nn.Linear(encode_dim, 4096), nn.ReLU(),
+            nn.BatchNorm1d(4096), nn.Dropout(0.5),
+            nn.Linear(4096, 512), nn.ReLU(),
+            nn.BatchNorm1d(512), nn.Dropout(0.5),
+            nn.Linear(512, n_classes+5)
         )
+        self.model.classifier = head
 
-    def forward(self, crops):
-        features = self.img_encoder(crops)
-        probs = self.cls_head(features)
-        bbox = self.reg_head(features)
-        return probs, bbox
+    def forward(self, crops): return self.model(crops)
 
-    def calc_loss(self, preds, *targs, beta=0.2):
-        probs, pred_offsets = preds
-        _, _, ids, offsets, _ = targs
-        cls_loss = nn.CrossEntropyLoss()(probs, ids)
-        reg_loss = torch.tensor(0.0, requires_grad=True)
-        mask = ids!=0
-        if torch.sum(mask)>0:
-            reg_loss = nn.MSELoss()(pred_offsets[mask], offsets[mask])
-            
-        return beta*cls_loss + (1-beta)*reg_loss
+def reg_loss(preds, *targs):
+    _, _, roi_ids, offsets = targs
+    loss = torch.tensor(0.0, requires_grad=True)
+    mask = roi_ids!=0
+    if torch.sum(mask)>0:
+        loss = nn.L1Loss()(preds[mask, -4:], offsets[mask])
+    return loss
+
+def cls_loss(preds, *targs):
+    _, _, roi_ids, _ = targs
+    loss = torch.tensor(0.0, requires_grad=True)
+    n_classes = preds.shape[1]-4
+    cats = one_hot(roi_ids, num_classes=n_classes)
+    preds[:,:-4] = nn.Sigmoid()(preds[:,:-4])
+    loss = nn.BCELoss()(preds[:,1:-4], cats[:,1:].to(torch.float32))
+    return loss
+
+def detn_loss(preds, *targs):
+    return cls_loss(preds, *targs) + reg_loss(preds, *targs)
 
 class mAP(Metric):
     def __init__(self, gt_path, pred_path):
@@ -76,12 +109,11 @@ class mAP(Metric):
             json.dump([], f, indent=4)
 
     def accumulate(self, learn):
-        probs, pred_offsets = learn.pred
+        probs, pred_offsets = learn.pred[:,:-4], learn.pred[:,-4:]
         scores, pred_ids = probs.max(dim=1)
-        img_ids, rois, ids, _, img_dims  = learn.y
-        mask = ids!=0
-        pred_offsets = pred_offsets*img_dims
-        pred_bbs = rois+pred_offsets
+        img_ids, rois, roi_ids, _  = learn.y
+        mask = roi_ids!=0
+        pred_bbs = apply_offsets(rois, pred_offsets)
         
         self.write_to_file(img_ids[mask], pred_ids[mask], pred_bbs[mask], scores[mask])
 
@@ -99,10 +131,14 @@ class mAP(Metric):
             
     @property
     def value(self):
-        coco_gt = COCO(self.gt_path)
-        coco_pred = coco_gt.loadRes(self.pred_path)
-        cocoEval = COCOeval(coco_gt, coco_pred, 'bbox')
-        cocoEval.evaluate()
-        cocoEval.accumulate()
-        cocoEval.summarize()
+        with io.StringIO() as buf:
+            save_stdout = sys.stdout
+            sys.stdout = buf  # Redirect standard output
+            coco_gt = COCO(self.gt_path)
+            coco_pred = coco_gt.loadRes(self.pred_path)
+            cocoEval = COCOeval(coco_gt, coco_pred, 'bbox')
+            cocoEval.evaluate()
+            cocoEval.accumulate()
+            cocoEval.summarize()
+            sys.stdout = save_stdout  # Restore standard output
         return cocoEval.stats[0]
