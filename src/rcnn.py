@@ -1,6 +1,5 @@
 import io, sys, json
 from pathlib import Path
-from functools import partial
 from tqdm import tqdm
 tqdm.pandas()
 from src.core import load_data
@@ -44,14 +43,14 @@ class RCNNDataset(Dataset):
 
     def __getitem__(self, idx):
         img_id = self.img_ids[idx]
-        img = io.read_image(self.id2img[img_id.item()], mode=io.ImageReadMode.RGB)
+        img = read_image(self.id2img[img_id.item()], mode=ImageReadMode.RGB)
         img = self.tfms(img)
         x_min, y_min, w, h = self.rois[idx].int().tolist()
         crop = resized_crop(img, top=y_min, left=x_min, height=h, width=w, size=self.crop_size)
         
         return crop, img_id, self.rois[idx], self.roi_ids[idx], self.offsets[idx]
 
-def get_dls(train_ds, valid_ds, bs=128, tfms=None):
+def get_dls(train_ds, valid_ds, bs=128):
     train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, pin_memory=True)
     valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=False, pin_memory=True)
     
@@ -59,25 +58,13 @@ def get_dls(train_ds, valid_ds, bs=128, tfms=None):
     dls.n_inp = 1
     return dls
 
-class RCNN(nn.Module):
-    def __init__(self, n_classes):
-        super().__init__()
-        self.model = models.vgg16(weights=models.VGG16_Weights.DEFAULT)
-        for param in self.model.parameters():
-            param.requires_grad = False
-        self.model.eval()
-        encode_dim = self.model.classifier[0].in_features
-
-        head = nn.Sequential(
-            nn.Linear(encode_dim, 4096), nn.ReLU(),
-            nn.BatchNorm1d(4096), nn.Dropout(0.5),
-            nn.Linear(4096, 512), nn.ReLU(),
-            nn.BatchNorm1d(512), nn.Dropout(0.5),
-            nn.Linear(512, n_classes+5)
-        )
-        self.model.classifier = head
-
-    def forward(self, crops): return self.model(crops)
+def get_head(n_classes):
+    return nn.Sequential(nn.AdaptiveAvgPool2d((7,7)), nn.Flatten(),
+                         nn.Linear(25088, 4096), nn.ReLU(),
+                         nn.BatchNorm1d(4096), nn.Dropout(0.5),
+                         nn.Linear(4096, 512), nn.ReLU(),
+                         nn.BatchNorm1d(512), nn.Dropout(0.5),
+                         nn.Linear(512, n_classes+5))
 
 def reg_loss(preds, *targs):
     _, _, roi_ids, offsets = targs
@@ -92,8 +79,8 @@ def cls_loss(preds, *targs):
     loss = torch.tensor(0.0, requires_grad=True)
     n_classes = preds.shape[1]-4
     cats = one_hot(roi_ids, num_classes=n_classes)
-    preds[:,:-4] = nn.Sigmoid()(preds[:,:-4])
-    loss = nn.BCELoss()(preds[:,1:-4], cats[:,1:].to(torch.float32))
+    cat_preds = nn.Sigmoid()(preds[:,:-4])
+    loss = nn.BCELoss()(cat_preds[:,1:], cats[:,1:].to(torch.float32))
     return loss
 
 def detn_loss(preds, *targs):
