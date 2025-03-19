@@ -4,9 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-def show_bbs(img_path, bboxes, labels=None):
+def show_bbs(img_path, bboxes, labels=None, ax=None):
     img = plt.imread(img_path)
-    _, ax = plt.subplots(1)
+    if ax is None: _, ax = plt.subplots(1)
     ax.imshow(img)
     for i, bbox in enumerate(bboxes):
         xmin, ymin, w, h = bbox
@@ -14,7 +14,25 @@ def show_bbs(img_path, bboxes, labels=None):
         ax.add_patch(rect)
         if labels:
             ax.text(xmin+5, ymin+10, labels[i], color='black', fontsize=8, backgroundcolor='white')
-    plt.axis('off')  # Hide axes for better visualization
+    ax.axis('off')  # Hide axes for better visualization
+
+def show_imgs(ann_path, nrows, id2label, id2img, axes=None):
+    with open(ann_path, 'r') as f:
+        data = json.load(f)
+    if type(data)==dict: data = data['annotations']
+    df = pd.DataFrame(data).groupby('image_id').agg(list)
+    sample = df.sample(nrows*3)
+    if axes is None:
+        _, axes = plt.subplots(nrows, 3, figsize=(15, 5*nrows))
+    for ax, (img_id, row) in zip(axes.flatten(), sample.iterrows()):
+        img_path = id2img[img_id]
+        cat_ids, bboxes = row[['category_id','bbox']]
+        titles = [id2label[id] if id!=0 else 'background' for id in cat_ids]
+        if 'score' in row:
+            scores = row['score']
+            titles = [f'{l}, {score:.2f}' for l, score in zip(titles, scores)]
+        show_bbs(img_path, bboxes, titles, ax)
+    plt.tight_layout()
     plt.show()
 
 def load_data(ann_folder, imgs_folder, split='train'):
