@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -16,8 +15,8 @@ def show_bbs(img_path, bboxes, labels=None, ax=None):
             ax.text(xmin+5, ymin+10, labels[i], color='black', fontsize=8, backgroundcolor='white')
     ax.axis('off')  # Hide axes for better visualization
 
-def show_imgs(ann_path, nrows, id2label, id2img, axes=None):
-    with open(ann_path, 'r') as f:
+def show_imgs(ann_file, nrows, id2label, id2img, axes=None):
+    with open(ann_file, 'r') as f:
         data = json.load(f)
     if type(data)==dict: data = data['annotations']
     df = pd.DataFrame(data).groupby('image_id').agg(list)
@@ -35,12 +34,12 @@ def show_imgs(ann_path, nrows, id2label, id2img, axes=None):
     plt.tight_layout()
     plt.show()
 
-def load_data(ann_folder, imgs_folder, split='train'):
-    ann_folder, imgs_folder = Path(ann_folder), Path(imgs_folder)
-    data = json.load((ann_folder/f'{split}.json').open())
+def load_data(ann_file, imgs_folder):
+    with open(ann_file, 'r') as f:
+        data = json.load(f)
 
     id2label = {d['id']:d['name'] for d in data['categories']}
-    id2img = {d['id']:imgs_folder/d['file_name'] for d in data['images']}
+    id2img = {d['id']:f"{imgs_folder}/{d['file_name']}" for d in data['images']}
 
     df = pd.DataFrame(data['annotations'])
     df = df.query('ignore!=1').drop(columns=['segmentation','ignore'])
