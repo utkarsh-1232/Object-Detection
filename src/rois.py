@@ -5,10 +5,10 @@ from selectivesearch import selective_search
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
-def extract_rois(img):
+def extract_rois(img, scale=200, min_size=100):
     img_np = img.permute(1, 2, 0).numpy()
     h,w = img_np.shape[:2]; img_area = h*w
-    _, regions = selective_search(img_np, scale=200, min_size=100)
+    _, regions = selective_search(img_np, scale=scale, min_size=min_size)
     unique_rois = set()
     for r in regions:
         rect, size = r['rect'], r['size']
@@ -76,14 +76,13 @@ def annotate_rois(rois, gtbbs, cat_ids, cat_thresh=0.3):
     offsets = calculate_offsets(rois, gtbbs[max_idxs])
     return roi_ids, offsets, max_ious
 
-def get_annotated_rois(row, id2img, cat_thresh=0.3):
+def get_annotated_rois(row, id2img, scale=200, min_size=100, cat_thresh=0.3):
     img_id, gtbbs, cat_ids = row[['image_id','bbox','category_id']]
     img = io.read_image(id2img[img_id], mode=io.ImageReadMode.RGB)
     img_id = torch.tensor(img_id, dtype=torch.long)
     gtbbs = torch.tensor(gtbbs, dtype=torch.float32)
     cat_ids = torch.tensor(cat_ids, dtype=torch.long)
 
-    rois = extract_rois(img)
+    rois = extract_rois(img, scale=scale, min_size=min_size)
     roi_ids, offsets, max_ious = annotate_rois(rois, gtbbs, cat_ids, cat_thresh)
-    img_ids = img_id.repeat(rois.shape[0])
-    return img_ids, rois, roi_ids, offsets
+    return img_id, rois, roi_ids, offsets
