@@ -26,7 +26,7 @@ def show_imgs(ann_file, nrows, id2label, id2img, axes=None):
     for ax, (img_id, row) in zip(axes.flatten(), sample.iterrows()):
         img_path = id2img[img_id]
         cat_ids, bboxes = row[['category_id','bbox']]
-        titles = [id2label[id] if id!=0 else 'background' for id in cat_ids]
+        titles = [id2label[id] if id!=0 else 'bg' for id in cat_ids]
         if 'score' in row:
             scores = row['score']
             titles = [f'{l}, {score:.2f}' for l, score in zip(titles, scores)]
