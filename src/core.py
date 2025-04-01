@@ -2,6 +2,8 @@ import io, sys, json
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import torch
+from torchvision.ops import batched_nms
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -47,6 +49,15 @@ def load_data(ann_file, imgs_folder):
     agg_df = df.groupby('image_id').agg(list).reset_index()
     return agg_df, id2label, id2img
 
+def perform_nms(preds, thresh=0.5):
+    ids, bbs, scores = preds[['category_id','bbox','score']]
+    ids, bbs, scores = [torch.tensor(l, dtype=torch.float32) for l in [ids, bbs, scores]]
+    ids, bbs, scores = [t[ids!=0] for t in [ids, bbs, scores]]
+    boxes = torch.cat([bbs[:,:2], bbs[:,:2]+bbs[:,2:]-1], dim=1)
+    idxs = batched_nms(boxes, scores, ids, thresh)
+    preds[['category_id','bbox','score']] = [t[idxs].tolist() for t in [ids, bbs, scores]]
+    return preds
+    
 def calc_mAP(gt_path, pred_path):
     with io.StringIO() as buf:
         save_stdout = sys.stdout
